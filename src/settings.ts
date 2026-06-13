@@ -1,0 +1,83 @@
+import { PluginSettingTab, Setting, type App } from "obsidian";
+import type CcHitlPlugin from "./main.js";
+
+export interface HitlSettings {
+  host: string;
+  port: number;
+  token: string;
+  noticeOnQuestion: boolean;
+}
+
+export const DEFAULT_SETTINGS: HitlSettings = {
+  host: "127.0.0.1",
+  port: 22360,
+  token: "",
+  noticeOnQuestion: true,
+};
+
+export class HitlSettingTab extends PluginSettingTab {
+  constructor(
+    app: App,
+    private plugin: CcHitlPlugin,
+  ) {
+    super(app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName("Hub host")
+      .setDesc("Host the cc-hitl hub is bound to (almost always 127.0.0.1).")
+      .addText((t) =>
+        t
+          .setValue(this.plugin.settings.host)
+          .onChange(async (v) => {
+            this.plugin.settings.host = v.trim() || "127.0.0.1";
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Hub port")
+      .setDesc("Port from `cc-hitl status` (default 22360).")
+      .addText((t) =>
+        t.setValue(String(this.plugin.settings.port)).onChange(async (v) => {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) {
+            this.plugin.settings.port = n;
+            await this.plugin.saveSettings();
+          }
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Bearer token")
+      .setDesc("From `cc-hitl token`. Required to connect to the bridge.")
+      .addText((t) => {
+        t.setValue(this.plugin.settings.token).onChange(async (v) => {
+          this.plugin.settings.token = v.trim();
+          await this.plugin.saveSettings();
+        });
+        t.inputEl.type = "password";
+      });
+
+    new Setting(containerEl)
+      .setName("Notice on new question")
+      .setDesc("Show an Obsidian notice whenever an agent asks a new question.")
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.noticeOnQuestion).onChange(async (v) => {
+          this.plugin.settings.noticeOnQuestion = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).addButton((b) =>
+      b
+        .setButtonText("Reconnect")
+        .setCta()
+        .onClick(() => this.plugin.reconnect()),
+    );
+  }
+}

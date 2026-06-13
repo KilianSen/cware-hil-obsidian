@@ -1,0 +1,9 @@
+{
+  "id": "cc-hitl",
+  "name": "Claude Code HITL",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Human-in-the-loop bridge for Claude Code agents: answer questions, make decisions, and watch a live agent dashboard from a sidebar panel.",
+  "author": "kilian",
+  "isDesktopOnly": true
+}

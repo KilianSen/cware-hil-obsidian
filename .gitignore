@@ -1,0 +1,7 @@
+node_modules/
+*.tsbuildinfo
+.DS_Store
+# esbuild bundle output (built from src/)
+main.js
+# obsidian plugin local settings (holds the bearer token)
+data.json
