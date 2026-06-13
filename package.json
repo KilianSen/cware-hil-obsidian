@@ -10,7 +10,7 @@
     "dev": "node esbuild.config.mjs"
   },
   "dependencies": {
-    "cware-hil-lib": "github:KilianSen/cware-hil-lib"
+    "cware-hil-lib": "git+https://github.com/KilianSen/cware-hil-lib.git"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
