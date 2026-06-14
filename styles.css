@@ -154,3 +154,90 @@
   height: 100%;
   background: var(--interactive-accent);
 }
+
+/* Tabs */
+.cc-hitl-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.cc-hitl-tab {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  border-bottom: 2px solid transparent;
+}
+.cc-hitl-tab.is-active {
+  color: var(--text-normal);
+  border-bottom-color: var(--interactive-accent);
+}
+
+/* History filter chips */
+.cc-hitl-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.cc-hitl-chip {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  padding: 1px 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-transform: capitalize;
+}
+.cc-hitl-chip.is-active {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+/* Priority + history status badges */
+.cc-hitl-prio {
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--color-red);
+}
+.cc-hitl-badge.status-answered {
+  background: var(--color-green);
+  color: white;
+}
+.cc-hitl-badge.status-cancelled {
+  background: var(--background-modifier-border);
+}
+.cc-hitl-badge.status-expired {
+  background: var(--color-red);
+  color: white;
+}
+.cc-hitl-answer {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.cc-hitl-answer-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: var(--font-ui-smaller);
+  letter-spacing: 0.04em;
+}
+
+/* Agent reverse-channel controls */
+.cc-hitl-agent-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 6px;
+}
+.cc-hitl-agent-msg {
+  flex: 1;
+  min-width: 0;
+}

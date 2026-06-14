@@ -1,8 +1,9 @@
 import { Notice, Plugin, type WorkspaceLeaf } from "obsidian";
-import type { Notification } from "cware-hil-lib";
+import type { Notification, Question } from "cware-hil-lib";
 import { HubClient } from "./hubClient.js";
 import { HitlView, VIEW_TYPE_HITL } from "./view.js";
 import { DEFAULT_SETTINGS, HitlSettingTab, type HitlSettings } from "./settings.js";
+import { osNotify, playBeep } from "./alerts.js";
 
 export default class CcHitlPlugin extends Plugin {
   declare settings: HitlSettings;
@@ -22,6 +23,7 @@ export default class CcHitlPlugin extends Plugin {
       new Notice(connected ? "cc-hitl: connected to hub" : "cc-hitl: hub connection lost");
     };
     this.client.onNotify = (n) => this.handleNotify(n);
+    this.client.onQuestionCreated = (q) => this.handleNewQuestion(q);
 
     this.registerView(VIEW_TYPE_HITL, (leaf) => new HitlView(leaf, this.client));
 
@@ -45,6 +47,13 @@ export default class CcHitlPlugin extends Plugin {
   private handleNotify(n: Notification): void {
     const prefix = n.level === "error" ? "⛔" : n.level === "warn" ? "⚠️" : "ℹ️";
     new Notice(`cc-hitl ${prefix} ${n.message}`);
+    if (this.settings.systemNotification) osNotify("cc-hitl", n.message);
+  }
+
+  /** Sound / OS-notification alerts for a freshly-arrived question. */
+  private handleNewQuestion(q: Question): void {
+    if (this.settings.soundOnQuestion) playBeep();
+    if (this.settings.systemNotification) osNotify("cc-hitl: new question", q.title);
   }
 
   /** Re-render every open HITL view; also surface a notice for new questions. */

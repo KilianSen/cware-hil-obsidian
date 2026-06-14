@@ -1,5 +1,5 @@
 import { ItemView, type WorkspaceLeaf } from "obsidian";
-import type { Agent, Question } from "cware-hil-lib";
+import type { Agent, Question, QuestionStatus } from "cware-hil-lib";
 import type { HubClient } from "./hubClient.js";
 
 export const VIEW_TYPE_HITL = "cc-hitl-view";
@@ -17,12 +17,23 @@ function relativeTime(iso: string): string {
   return `${h}h ago`;
 }
 
+type Tab = "pending" | "history" | "agents";
+const HISTORY_STATUSES: QuestionStatus[] = ["answered", "cancelled", "expired"];
+
 /**
- * The right-sidebar panel: a list of pending questions with inline answer
- * controls, and a live dashboard of connected agents. Reads its state from the
- * shared {@link HubClient}; the plugin calls {@link render} on every change.
+ * The right-sidebar panel. Three tabs: pending questions with inline answer
+ * controls, a read-only history view, and a live agent dashboard (with remove /
+ * message controls). Reads its state from the shared {@link HubClient}; the
+ * plugin calls {@link render} on every change.
  */
 export class HitlView extends ItemView {
+  private activeTab: Tab = "pending";
+  private historyRows: Question[] = [];
+  private historyStatuses = new Set<QuestionStatus>(["answered"]);
+  private historyLoading = false;
+  private historyError: string | null = null;
+  private messageDrafts = new Map<string, string>();
+
   constructor(
     leaf: WorkspaceLeaf,
     private client: HubClient,
@@ -58,13 +69,42 @@ export class HitlView extends ItemView {
       text: this.client.connected ? "● connected" : "● disconnected",
     });
 
-    // --- Pending questions ---
+    this.renderTabs(c);
+
+    if (this.activeTab === "pending") this.renderPendingTab(c);
+    else if (this.activeTab === "history") this.renderHistoryTab(c);
+    else this.renderAgentsTab(c);
+  }
+
+  private renderTabs(c: HTMLElement): void {
+    const pendingCount = [...this.client.questions.values()].filter(
+      (q) => q.status === "pending",
+    ).length;
+    const tabs = c.createDiv({ cls: "cc-hitl-tabs" });
+    const mk = (tab: Tab, label: string) => {
+      const btn = tabs.createEl("button", {
+        cls: `cc-hitl-tab ${this.activeTab === tab ? "is-active" : ""}`,
+        text: label,
+      });
+      btn.onclick = () => {
+        this.activeTab = tab;
+        if (tab === "history") void this.loadHistory();
+        else this.render();
+      };
+    };
+    mk("pending", `Pending (${pendingCount})`);
+    mk("history", "History");
+    mk("agents", `Agents (${this.client.agents.size})`);
+  }
+
+  // --- Pending tab ----------------------------------------------------------
+
+  private renderPendingTab(c: HTMLElement): void {
     const pending = [...this.client.questions.values()]
       .filter((q) => q.status === "pending")
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
     const qSec = c.createDiv({ cls: "cc-hitl-section" });
-    qSec.createDiv({ cls: "cc-hitl-section-title", text: `Pending questions (${pending.length})` });
     if (!pending.length) {
       qSec.createDiv({
         cls: "cc-hitl-empty",
@@ -72,13 +112,83 @@ export class HitlView extends ItemView {
       });
     }
     for (const q of pending) this.renderQuestion(qSec.createDiv({ cls: "cc-hitl-card" }), q);
+  }
 
-    // --- Agent dashboard ---
+  // --- History tab ----------------------------------------------------------
+
+  private async loadHistory(): Promise<void> {
+    this.historyLoading = true;
+    this.historyError = null;
+    this.render();
+    try {
+      const res = await this.client.requestHistory({
+        statuses: [...this.historyStatuses],
+        limit: 50,
+      });
+      this.historyRows = res.questions;
+    } catch (e) {
+      this.historyError = (e as Error).message;
+    } finally {
+      this.historyLoading = false;
+      this.render();
+    }
+  }
+
+  private renderHistoryTab(c: HTMLElement): void {
+    const sec = c.createDiv({ cls: "cc-hitl-section" });
+    const filters = sec.createDiv({ cls: "cc-hitl-filters" });
+    for (const s of HISTORY_STATUSES) {
+      const btn = filters.createEl("button", {
+        cls: `cc-hitl-chip ${this.historyStatuses.has(s) ? "is-active" : ""}`,
+        text: s,
+      });
+      btn.onclick = () => {
+        if (this.historyStatuses.has(s)) this.historyStatuses.delete(s);
+        else this.historyStatuses.add(s);
+        void this.loadHistory();
+      };
+    }
+    const refresh = filters.createEl("button", { cls: "cc-hitl-chip", text: "↻" });
+    refresh.onclick = () => void this.loadHistory();
+
+    if (this.historyError) {
+      sec.createDiv({ cls: "cc-hitl-empty", text: `Couldn't load history: ${this.historyError}` });
+      return;
+    }
+    if (this.historyLoading && !this.historyRows.length) {
+      sec.createDiv({ cls: "cc-hitl-empty", text: "Loading…" });
+      return;
+    }
+    if (!this.historyRows.length) {
+      sec.createDiv({ cls: "cc-hitl-empty", text: "No matching history." });
+      return;
+    }
+    for (const q of this.historyRows) this.renderHistoryCard(sec.createDiv({ cls: "cc-hitl-card" }), q);
+  }
+
+  private renderHistoryCard(card: HTMLElement, q: Question): void {
+    const head = card.createDiv({ cls: "cc-hitl-card-head" });
+    head.createSpan({ cls: "cc-hitl-kind", text: q.kind.replace("_", " ") });
+    head.createSpan({ cls: `cc-hitl-badge status-${q.status}`, text: q.status });
+    if (q.priority && q.priority !== "normal")
+      head.createSpan({ cls: "cc-hitl-prio", text: q.priority });
+    head.createSpan({ cls: "cc-hitl-card-agent", text: relativeTime(q.createdAt) });
+
+    card.createDiv({ cls: "cc-hitl-card-title", text: q.title });
+    const ctx = q.prompt ?? q.approval?.body;
+    if (ctx) card.createDiv({ cls: "cc-hitl-prompt", text: ctx });
+    const ans = card.createDiv({ cls: "cc-hitl-answer" });
+    ans.createSpan({ cls: "cc-hitl-answer-label", text: "Answer: " });
+    ans.createSpan({ text: historyAnswer(q) });
+  }
+
+  // --- Agents tab -----------------------------------------------------------
+
+  private renderAgentsTab(c: HTMLElement): void {
     const agents = [...this.client.agents.values()].sort((a, b) =>
       a.startedAt.localeCompare(b.startedAt),
     );
     const aSec = c.createDiv({ cls: "cc-hitl-section" });
-    aSec.createDiv({ cls: "cc-hitl-section-title", text: `Agents (${agents.length})` });
     if (!agents.length) aSec.createDiv({ cls: "cc-hitl-empty", text: "No agents yet." });
     for (const a of agents) this.renderAgent(aSec.createDiv({ cls: "cc-hitl-agent" }), a);
   }
@@ -86,6 +196,8 @@ export class HitlView extends ItemView {
   private renderQuestion(card: HTMLElement, q: Question): void {
     const head = card.createDiv({ cls: "cc-hitl-card-head" });
     head.createSpan({ cls: "cc-hitl-kind", text: q.kind.replace("_", " ") });
+    if (q.priority && q.priority !== "normal")
+      head.createSpan({ cls: "cc-hitl-prio", text: q.priority });
     const agentLabel = this.client.agents.get(q.agentId)?.label;
     if (agentLabel) head.createSpan({ cls: "cc-hitl-card-agent", text: agentLabel });
 
@@ -189,5 +301,35 @@ export class HitlView extends ItemView {
       bar.createDiv({ cls: "cc-hitl-progress-fill" }).style.width =
         `${Math.round(a.progress * 100)}%`;
     }
+
+    // Reverse channel + removal controls.
+    const controls = row.createDiv({ cls: "cc-hitl-agent-controls" });
+    const input = controls.createEl("input", { type: "text", cls: "cc-hitl-agent-msg" });
+    input.placeholder = "Message this agent…";
+    input.value = this.messageDrafts.get(a.agentId) ?? "";
+    input.oninput = () => this.messageDrafts.set(a.agentId, input.value);
+    const send = controls.createEl("button", { text: "Send" });
+    send.onclick = () => {
+      const text = input.value.trim();
+      if (!text) return;
+      this.client.sendToAgent(a.stableId ?? a.agentId, text);
+      this.messageDrafts.delete(a.agentId);
+      input.value = "";
+    };
+    const remove = controls.createEl("button", { text: "Remove", cls: "mod-warning" });
+    remove.onclick = () => this.client.removeAgent(a.agentId);
   }
+}
+
+function historyAnswer(q: Question): string {
+  const a = q.answer;
+  if (!a) return q.status === "pending" ? "— still waiting —" : "— no answer —";
+  if (a.kind === "ask_user") return a.text || "(empty)";
+  if (a.kind === "ask_choice") {
+    const labels = (a.choiceIds ?? [])
+      .map((id) => q.choices?.find((c) => c.id === id)?.label ?? id)
+      .join(", ");
+    return a.text ? `${labels || "(none)"} — note: ${a.text}` : labels || "(none)";
+  }
+  return a.comment ? `${a.decision} — ${a.comment}` : (a.decision ?? "—");
 }

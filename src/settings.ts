@@ -6,6 +6,8 @@ export interface HitlSettings {
   port: number;
   token: string;
   noticeOnQuestion: boolean;
+  soundOnQuestion: boolean;
+  systemNotification: boolean;
 }
 
 export const DEFAULT_SETTINGS: HitlSettings = {
@@ -13,6 +15,8 @@ export const DEFAULT_SETTINGS: HitlSettings = {
   port: 22360,
   token: "",
   noticeOnQuestion: true,
+  soundOnQuestion: false,
+  systemNotification: false,
 };
 
 export class HitlSettingTab extends PluginSettingTab {
@@ -69,6 +73,26 @@ export class HitlSettingTab extends PluginSettingTab {
       .addToggle((tg) =>
         tg.setValue(this.plugin.settings.noticeOnQuestion).onChange(async (v) => {
           this.plugin.settings.noticeOnQuestion = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Sound on new question")
+      .setDesc("Play a short beep when a new question arrives.")
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.soundOnQuestion).onChange(async (v) => {
+          this.plugin.settings.soundOnQuestion = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("System notification")
+      .setDesc("Show an OS-level desktop notification on new questions (works even when Obsidian isn't focused).")
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.systemNotification).onChange(async (v) => {
+          this.plugin.settings.systemNotification = v;
           await this.plugin.saveSettings();
         }),
       );

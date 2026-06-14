@@ -2,7 +2,9 @@ import {
   BRIDGE_PROTOCOL_VERSION,
   parseServerMessage,
   type Agent,
+  type AgentMessage,
   type Answer,
+  type HistoryFilter,
   type Notification,
   type Question,
 } from "cware-hil-lib";
@@ -11,6 +13,11 @@ export interface HubConnectionConfig {
   host: string;
   port: number;
   token: string;
+}
+
+export interface HistoryResult {
+  questions: Question[];
+  hasMore: boolean;
 }
 
 const MAX_BACKOFF_MS = 30_000;
@@ -26,12 +33,18 @@ const BASE_BACKOFF_MS = 1_000;
 export class HubClient {
   readonly questions = new Map<string, Question>();
   readonly agents = new Map<string, Agent>();
+  /** Notification history, oldest-first; seeded from the snapshot on connect. */
+  readonly notifications: Notification[] = [];
+  /** Reverse-channel messages the human has sent agents (most recent last). */
+  readonly agentMessages: AgentMessage[] = [];
   connected = false;
 
   /** UI hooks — set by the view/plugin. */
   onChange: () => void = () => {};
   onNotify: (n: Notification) => void = () => {};
   onConnectionChange: (connected: boolean) => void = () => {};
+  /** Fired when a brand-new pending question arrives (for alerts). */
+  onQuestionCreated: (q: Question) => void = () => {};
 
   private cfg: HubConnectionConfig;
   private ws: WebSocket | null = null;
@@ -40,6 +53,8 @@ export class HubClient {
   private lastSeq = 0;
   private stopped = true;
   private readonly clientId = "obsidian-" + Math.random().toString(36).slice(2, 10);
+  private historyWaiters = new Map<string, (r: HistoryResult) => void>();
+  private historySeq = 0;
 
   constructor(cfg: HubConnectionConfig) {
     this.cfg = cfg;
@@ -71,6 +86,39 @@ export class HubClient {
 
   cancelQuestion(questionId: string): void {
     this.sendRaw({ type: "cancel_question", questionId });
+  }
+
+  /** Send a message to a running agent (reverse channel). */
+  sendToAgent(agentId: string, text: string): void {
+    this.sendRaw({ type: "send_to_agent", agentId, text });
+  }
+
+  /** Remove an agent from the registry. */
+  removeAgent(agentId: string): void {
+    this.sendRaw({ type: "remove_agent", agentId });
+  }
+
+  /**
+   * Query question history. Resolves with the matching `history` frame, or
+   * rejects after a timeout / if the socket isn't open.
+   */
+  requestHistory(filter: HistoryFilter, timeoutMs = 8000): Promise<HistoryResult> {
+    return new Promise<HistoryResult>((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error("not connected"));
+        return;
+      }
+      const requestId = `h${++this.historySeq}-${this.clientId}`;
+      const timer = setTimeout(() => {
+        this.historyWaiters.delete(requestId);
+        reject(new Error("history request timed out"));
+      }, timeoutMs);
+      this.historyWaiters.set(requestId, (r) => {
+        clearTimeout(timer);
+        resolve(r);
+      });
+      this.sendRaw({ type: "request_history", requestId, filter });
+    });
   }
 
   // --- internals ------------------------------------------------------------
@@ -130,14 +178,26 @@ export class HubClient {
         this.agents.clear();
         for (const q of msg.questions) this.questions.set(q.id, q);
         for (const a of msg.agents) this.agents.set(a.agentId, a);
+        // Reconcile notification history: seed from the snapshot, de-duped by id.
+        if (msg.notifications) {
+          const seen = new Set(this.notifications.map((n) => n.id));
+          for (const n of msg.notifications) {
+            if (!seen.has(n.id)) this.notifications.push(n);
+          }
+        }
         this.reconnectAttempts = 0;
         this.setConnected(true);
         this.onChange();
         break;
       case "question_created":
       case "question_updated":
-        if (msg.question.status === "pending") this.questions.set(msg.question.id, msg.question);
-        else this.questions.delete(msg.question.id);
+        if (msg.question.status === "pending") {
+          const isNew = !this.questions.has(msg.question.id);
+          this.questions.set(msg.question.id, msg.question);
+          if (isNew && msg.type === "question_created") this.onQuestionCreated(msg.question);
+        } else {
+          this.questions.delete(msg.question.id);
+        }
         this.onChange();
         break;
       case "agent_updated":
@@ -149,8 +209,26 @@ export class HubClient {
         this.onChange();
         break;
       case "notify":
+        if (!this.notifications.some((n) => n.id === msg.notification.id)) {
+          this.notifications.push(msg.notification);
+          if (this.notifications.length > 200) this.notifications.shift();
+        }
         this.onNotify(msg.notification);
+        this.onChange();
         break;
+      case "agent_message":
+        this.agentMessages.push(msg.message);
+        if (this.agentMessages.length > 200) this.agentMessages.shift();
+        this.onChange();
+        break;
+      case "history": {
+        const waiter = this.historyWaiters.get(msg.requestId);
+        if (waiter) {
+          this.historyWaiters.delete(msg.requestId);
+          waiter({ questions: msg.questions, hasMore: msg.hasMore });
+        }
+        break;
+      }
       case "pong":
         break;
     }
